@@ -1,0 +1,89 @@
+# ==============================================================================
+# StockTaggerIA - Production .gitignore
+# ==============================================================================
+
+# Binaries & Compiled Executables
+bin/
+dist/
+dist-windows/
+build/
+out/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Compressed Archives & Packages
+*.zip
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# Go Build & Test Artifacts
+*.test
+*.out
+coverage.html
+coverage.out
+coverage.txt
+cpu.pprof
+mem.pprof
+
+# Sensitive Credentials & Environment Configurations
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.token
+*.secret
+
+# Runtime Generated Data & Automatic Tag Backups
+stock_tags_*.json
+tags_backup_*.json
+*.log
+
+# Operating System Files
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.fuse_hidden*
+.nfs*
+
+# IDE & Editor Configurations
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+
+# Python Virtual Environments & Caches (for companion scripts/tools)
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
