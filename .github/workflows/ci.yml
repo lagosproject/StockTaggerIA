@@ -64,6 +64,7 @@ jobs:
             binary_name: stocktaggeria
             artifact_name: stocktaggeria-linux-amd64
             run_tests: true
+            test_cgo: "1"
             race: "-race"
           - name: macOS ARM64 (Apple Silicon)
             os: macos-latest
@@ -72,6 +73,7 @@ jobs:
             binary_name: stocktaggeria
             artifact_name: stocktaggeria-darwin-arm64
             run_tests: true
+            test_cgo: "0"
             race: ""
           - name: Windows x64
             os: windows-latest
@@ -80,6 +82,7 @@ jobs:
             binary_name: stocktaggeria.exe
             artifact_name: stocktaggeria-windows-amd64
             run_tests: true
+            test_cgo: "0"
             race: ""
           - name: Windows ARM64 (Qualcomm Snapdragon / Surface ARM)
             os: ubuntu-latest
@@ -88,6 +91,7 @@ jobs:
             binary_name: stocktaggeria_arm64.exe
             artifact_name: stocktaggeria-windows-arm64
             run_tests: false
+            test_cgo: "0"
             race: ""
 
     steps:
@@ -115,6 +119,7 @@ jobs:
       - name: Run Unit Tests with Coverage
         if: ${{ matrix.target.run_tests }}
         env:
+          CGO_ENABLED: ${{ matrix.target.test_cgo }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || 'ci_mock_test_key' }}
         shell: bash
         run: |
