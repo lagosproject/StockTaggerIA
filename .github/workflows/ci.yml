@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   # --------------------------------------------------------------------------
@@ -160,3 +160,53 @@ jobs:
           name: ${{ matrix.target.artifact_name }}
           path: dist/${{ matrix.target.binary_name }}
           retention-days: 14
+
+  # --------------------------------------------------------------------------
+  # 3. Publish GitHub Release with Assets (Triggered on Version Tags 'v*')
+  # --------------------------------------------------------------------------
+  release:
+    name: Publish Official GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all compiled artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package Release Archives & Compute Checksums
+        shell: bash
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG_NAME#v}"
+          mkdir -p release-dist
+
+          # Package Linux x64
+          tar -czf release-dist/stocktaggeria_${VERSION}_linux_amd64.tar.gz -C artifacts/stocktaggeria-linux-amd64 stocktaggeria README.md LICENSE .env.example
+
+          # Package macOS ARM64
+          tar -czf release-dist/stocktaggeria_${VERSION}_darwin_arm64.tar.gz -C artifacts/stocktaggeria-darwin-arm64 stocktaggeria README.md LICENSE .env.example
+
+          # Package Windows x64
+          (cd artifacts/stocktaggeria-windows-amd64 && zip -9 ../../release-dist/stocktaggeria_${VERSION}_windows_amd64.zip stocktaggeria.exe)
+          zip -u -j release-dist/stocktaggeria_${VERSION}_windows_amd64.zip README.md LICENSE .env.example
+
+          # Package Windows ARM64 (Qualcomm Snapdragon)
+          (cd artifacts/stocktaggeria-windows-arm64 && zip -9 ../../release-dist/stocktaggeria_${VERSION}_windows_arm64.zip stocktaggeria_arm64.exe)
+          zip -u -j release-dist/stocktaggeria_${VERSION}_windows_arm64.zip README.md LICENSE .env.example
+
+          # Package Lightroom Classic Lua Plugin
+          (cd lrplugin && zip -r ../release-dist/StockTaggerIA-LightroomPlugin_v${VERSION}.zip StockTaggerIA.lrplugin)
+
+          # Generate SHA256 Checksums
+          (cd release-dist && sha256sum * > checksums.txt)
+
+      - name: Upload Release Assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-dist/*
+          generate_release_notes: true
