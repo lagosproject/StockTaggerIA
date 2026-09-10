@@ -62,25 +62,33 @@ jobs:
             goos: linux
             goarch: amd64
             binary_name: stocktaggeria
+            artifact_name: stocktaggeria-linux-amd64
             run_tests: true
+            race: "-race"
           - name: macOS ARM64 (Apple Silicon)
             os: macos-latest
             goos: darwin
             goarch: arm64
             binary_name: stocktaggeria
+            artifact_name: stocktaggeria-darwin-arm64
             run_tests: true
+            race: ""
           - name: Windows x64
             os: windows-latest
             goos: windows
             goarch: amd64
             binary_name: stocktaggeria.exe
+            artifact_name: stocktaggeria-windows-amd64
             run_tests: true
+            race: ""
           - name: Windows ARM64 (Qualcomm Snapdragon / Surface ARM)
             os: ubuntu-latest
             goos: windows
             goarch: arm64
             binary_name: stocktaggeria_arm64.exe
+            artifact_name: stocktaggeria-windows-arm64
             run_tests: false
+            race: ""
 
     steps:
       - name: Checkout repository
@@ -110,7 +118,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || 'ci_mock_test_key' }}
         shell: bash
         run: |
-          go test -v -race -coverprofile=coverage-${{ matrix.target.goos }}-${{ matrix.target.goarch }}.txt -covermode=atomic ./...
+          go test -v ${{ matrix.target.race }} -coverprofile=coverage-${{ matrix.target.goos }}-${{ matrix.target.goarch }}.txt -covermode=atomic ./...
 
       - name: Upload Test Coverage
         if: ${{ matrix.target.run_tests && matrix.target.os == 'ubuntu-latest' }}
@@ -144,6 +152,6 @@ jobs:
       - name: Upload Platform Binary Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target.name }}-binary
+          name: ${{ matrix.target.artifact_name }}
           path: dist/${{ matrix.target.binary_name }}
           retention-days: 14
