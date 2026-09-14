@@ -15,7 +15,7 @@ import (
 	"github.com/lagosproject/StockTaggerIA/src/presets"
 )
 
-const AppVersion = "1.0.0"
+const AppVersion = "1.0.1"
 
 func main() {
 	// Detect default directories
@@ -190,5 +190,8 @@ func main() {
 		metadataMap = mMap
 	}
 
-	metadata.UpdateImageMetadata(metadataMap, activeDir, preset, finalLang, *dryRun, msg)
+	stats := metadata.UpdateImageMetadata(metadataMap, activeDir, preset, finalLang, *dryRun, msg)
+	if stats.Errors > 0 {
+		os.Exit(1)
+	}
 }

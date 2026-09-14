@@ -186,18 +186,24 @@ jobs:
           mkdir -p release-dist
 
           # Package Linux x64
-          tar -czf release-dist/stocktaggeria_${VERSION}_linux_amd64.tar.gz -C artifacts/stocktaggeria-linux-amd64 stocktaggeria README.md LICENSE .env.example
+          mkdir -p stage-linux
+          cp artifacts/stocktaggeria-linux-amd64/stocktaggeria README.md LICENSE .env.example stage-linux/
+          tar -czf release-dist/stocktaggeria_${VERSION}_linux_amd64.tar.gz -C stage-linux stocktaggeria README.md LICENSE .env.example
 
           # Package macOS ARM64
-          tar -czf release-dist/stocktaggeria_${VERSION}_darwin_arm64.tar.gz -C artifacts/stocktaggeria-darwin-arm64 stocktaggeria README.md LICENSE .env.example
+          mkdir -p stage-darwin
+          cp artifacts/stocktaggeria-darwin-arm64/stocktaggeria README.md LICENSE .env.example stage-darwin/
+          tar -czf release-dist/stocktaggeria_${VERSION}_darwin_arm64.tar.gz -C stage-darwin stocktaggeria README.md LICENSE .env.example
 
           # Package Windows x64
-          (cd artifacts/stocktaggeria-windows-amd64 && zip -9 ../../release-dist/stocktaggeria_${VERSION}_windows_amd64.zip stocktaggeria.exe)
-          zip -u -j release-dist/stocktaggeria_${VERSION}_windows_amd64.zip README.md LICENSE .env.example
+          mkdir -p stage-win-amd64
+          cp artifacts/stocktaggeria-windows-amd64/stocktaggeria.exe README.md LICENSE .env.example stage-win-amd64/
+          (cd stage-win-amd64 && zip -9 ../release-dist/stocktaggeria_${VERSION}_windows_amd64.zip stocktaggeria.exe README.md LICENSE .env.example)
 
           # Package Windows ARM64 (Qualcomm Snapdragon)
-          (cd artifacts/stocktaggeria-windows-arm64 && zip -9 ../../release-dist/stocktaggeria_${VERSION}_windows_arm64.zip stocktaggeria_arm64.exe)
-          zip -u -j release-dist/stocktaggeria_${VERSION}_windows_arm64.zip README.md LICENSE .env.example
+          mkdir -p stage-win-arm64
+          cp artifacts/stocktaggeria-windows-arm64/stocktaggeria_arm64.exe README.md LICENSE .env.example stage-win-arm64/
+          (cd stage-win-arm64 && zip -9 ../release-dist/stocktaggeria_${VERSION}_windows_arm64.zip stocktaggeria_arm64.exe README.md LICENSE .env.example)
 
           # Package Lightroom Classic Lua Plugin
           (cd lrplugin && zip -r ../release-dist/StockTaggerIA-LightroomPlugin_v${VERSION}.zip StockTaggerIA.lrplugin)

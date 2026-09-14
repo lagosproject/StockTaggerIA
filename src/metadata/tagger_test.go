@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"os"
 	"testing"
 )
 
@@ -63,5 +64,71 @@ func TestParseStringOrSlice(t *testing.T) {
 	res3 := ParseStringOrSlice([]string{"x", "y"})
 	if len(res3) != 2 {
 		t.Errorf("Failed parsing string slice: %v", res3)
+	}
+}
+
+func TestCleanBaseName(t *testing.T) {
+	cases := map[string]string{
+		`C:\Users\Photo\Beach.jpg`: "beach.jpg",
+		`/home/user/photos/Sunset.JPG`: "sunset.jpg",
+		`simple.png`: "simple.png",
+		`D:\Data\Sub\test.jpeg`: "test.jpeg",
+	}
+	for in, expected := range cases {
+		out := cleanBaseName(in)
+		if out != expected {
+			t.Errorf("cleanBaseName(%q) = %q, expected %q", in, out, expected)
+		}
+	}
+}
+
+func TestLoadMetadataMapFromJSON(t *testing.T) {
+	importOS := func(content string) string {
+		f, err := os.CreateTemp("", "tag_test_*.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString(content)
+		f.Close()
+		return f.Name()
+	}
+
+	// 1. Array with UTF-8 BOM
+	bomJSON := "\xef\xbb\xbf[{\"filename\": \"img1.jpg\", \"tags\": \"sky, blue\"}]"
+	p1 := importOS(bomJSON)
+	defer os.Remove(p1)
+
+	m1, err := LoadMetadataMapFromJSON(p1)
+	if err != nil {
+		t.Fatalf("Failed loading BOM JSON: %v", err)
+	}
+	if len(m1) != 1 || m1["img1.jpg"].Filename != "img1.jpg" {
+		t.Errorf("Unexpected m1 contents: %+v", m1)
+	}
+
+	// 2. Map keyed by filename
+	mapJSON := "{\"img2.jpg\": {\"tags_en\": \"sea, water\"}}"
+	p2 := importOS(mapJSON)
+	defer os.Remove(p2)
+
+	m2, err := LoadMetadataMapFromJSON(p2)
+	if err != nil {
+		t.Fatalf("Failed loading map JSON: %v", err)
+	}
+	if len(m2) != 1 || m2["img2.jpg"].TagsEn != "sea, water" {
+		t.Errorf("Unexpected m2 contents: %+v", m2)
+	}
+
+	// 3. Wrapped object: {"images": [...]}
+	wrappedJSON := "{\"images\": [{\"filename\": \"D:\\\\Photos\\\\Img3.jpg\", \"tags\": \"forest\"}]}"
+	p3 := importOS(wrappedJSON)
+	defer os.Remove(p3)
+
+	m3, err := LoadMetadataMapFromJSON(p3)
+	if err != nil {
+		t.Fatalf("Failed loading wrapped JSON: %v", err)
+	}
+	if len(m3) != 1 || m3["img3.jpg"].Tags != "forest" {
+		t.Errorf("Unexpected m3 contents: %+v", m3)
 	}
 }

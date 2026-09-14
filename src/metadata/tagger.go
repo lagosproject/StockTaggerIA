@@ -1,14 +1,15 @@
 package metadata
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/lagosproject/StockTaggerIA/src/i18n"
 	"github.com/lagosproject/StockTaggerIA/src/presets"
@@ -294,16 +295,57 @@ func ParseMetadataEntry(item MetadataRaw, language string, maxTags int) ([]strin
 }
 
 // LoadMetadataMapFromJSON parses a JSON file into a filename-keyed map.
+// Supports array format ([]MetadataRaw), map format ({"file.jpg": ...}),
+// wrapped format ({"images": [...]}), and auto-strips UTF-8 BOM.
 func LoadMetadataMapFromJSON(jsonPath string) (map[string]MetadataRaw, error) {
 	data, err := os.ReadFile(jsonPath)
 	if err != nil {
 		return nil, err
 	}
+
+	// 1. Strip UTF-8 Byte Order Mark (BOM: \xef\xbb\xbf) often written by Windows editors/PowerShell
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	data = bytes.TrimSpace(data)
+
+	// 2. Try array format: [ { "filename": ... }, ... ]
 	var rawEntries []MetadataRaw
-	if err := json.Unmarshal(data, &rawEntries); err != nil {
-		return nil, err
+	if err := json.Unmarshal(data, &rawEntries); err == nil {
+		return MetadataMapFromRawEntries(rawEntries), nil
 	}
-	return MetadataMapFromRawEntries(rawEntries), nil
+
+	// 3. Try key-value map format: { "photo1.jpg": { ... }, "photo2.jpg": { ... } }
+	var rawMap map[string]MetadataRaw
+	if err := json.Unmarshal(data, &rawMap); err == nil && len(rawMap) > 0 {
+		res := make(map[string]MetadataRaw, len(rawMap))
+		for k, item := range rawMap {
+			cleanKey := cleanBaseName(k)
+			if item.Filename == "" {
+				item.Filename = k
+			}
+			res[cleanKey] = item
+		}
+		return res, nil
+	}
+
+	// 4. Try wrapper object format: { "images": [ ... ] } or { "photos": [ ... ] } or { "data": [ ... ] }
+	var wrapperMap map[string]json.RawMessage
+	if err := json.Unmarshal(data, &wrapperMap); err == nil {
+		for _, key := range []string{"images", "photos", "items", "data", "results", "tags"} {
+			if innerData, ok := wrapperMap[key]; ok {
+				var innerEntries []MetadataRaw
+				if err := json.Unmarshal(innerData, &innerEntries); err == nil && len(innerEntries) > 0 {
+					return MetadataMapFromRawEntries(innerEntries), nil
+				}
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("unable to parse JSON metadata: unrecognized structure or invalid syntax in %s", jsonPath)
+}
+
+func cleanBaseName(p string) string {
+	norm := strings.ReplaceAll(p, "\\", "/")
+	return strings.ToLower(filepath.Base(norm))
 }
 
 // MetadataMapFromRawEntries converts a slice of entries into a map keyed by lowercase base filename.
@@ -311,7 +353,7 @@ func MetadataMapFromRawEntries(entries []MetadataRaw) map[string]MetadataRaw {
 	res := make(map[string]MetadataRaw, len(entries))
 	for _, item := range entries {
 		if item.Filename != "" {
-			clean := strings.ToLower(filepath.Base(item.Filename))
+			clean := cleanBaseName(item.Filename)
 			res[clean] = item
 		}
 	}
@@ -372,16 +414,17 @@ func UpdateImagesMetadata(
 	fmt.Printf("Target / Context : %s\n\n", targetDesc)
 
 	var session *ExifToolSession
-	var exiftoolPath string
+	var cmdConfig *ExifToolCommand
 	if !dryRun {
-		etPath, err := FindExifTool()
+		cfg, err := ResolveExifToolCommand()
 		if err != nil {
 			fmt.Printf("[ERROR] %s (%v)\n", msg.ExifToolNotFound, err)
 			stats.Errors++
+			writeErrorLog(displayTarget, stats.ErrorDetails, fmt.Sprintf("ExifTool discovery error: %v", err))
 			return stats
 		}
-		exiftoolPath = etPath
-		sess, err := StartExifToolSession(exiftoolPath)
+		cmdConfig = cfg
+		sess, err := StartExifToolSessionWithCmd(cmdConfig)
 		if err != nil {
 			fmt.Printf("[WARN] Failed starting ExifTool in persistent stay-open mode (%v). Falling back to direct calls.\n", err)
 		} else {
@@ -392,9 +435,21 @@ func UpdateImagesMetadata(
 
 	for _, path := range images {
 		stats.FilesScanned++
-		lookupKey := strings.ToLower(filepath.Base(path))
+		lookupKey := cleanBaseName(path)
 
 		itemData, exists := metadataMap[lookupKey]
+		if !exists {
+			// Fallback: match by filename without extension
+			baseNoExt := strings.TrimSuffix(lookupKey, strings.ToLower(filepath.Ext(lookupKey)))
+			for k, v := range metadataMap {
+				if strings.TrimSuffix(k, strings.ToLower(filepath.Ext(k))) == baseNoExt {
+					itemData = v
+					exists = true
+					break
+				}
+			}
+		}
+
 		if !exists {
 			continue
 		}
@@ -422,9 +477,10 @@ func UpdateImagesMetadata(
 		}
 
 		// Build ExifTool argument list with preallocated capacity
-		args := make([]string, 0, 10+2*len(tagList))
+		args := make([]string, 0, 12+2*len(tagList))
 		args = append(args,
 			"-overwrite_original",
+			"-charset", "utf8",
 			"-charset", "filename=utf8",
 			"-codedcharacterset=utf8",
 			"-XMP-dc:Subject=",
@@ -453,11 +509,27 @@ func UpdateImagesMetadata(
 		var opErr error
 		if session != nil {
 			_, opErr = session.Execute(args)
+			if opErr != nil {
+				// Persistent session failed (e.g. pipe broken, EOF, or crash).
+				// Recover by closing broken session and falling back to direct process execution.
+				fmt.Printf("[WARN] ExifTool persistent session failed (%v). Falling back to direct process execution for %s...\n", opErr, path)
+				session.Close()
+				session = nil
+
+				// Retry immediately via direct command
+				cmd := cmdConfig.BuildCommand(args...)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					opErr = fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+				} else {
+					opErr = nil // Fallback succeeded!
+				}
+			}
 		} else {
-			cmd := exec.Command(exiftoolPath, args...)
+			cmd := cmdConfig.BuildCommand(args...)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
-				opErr = fmt.Errorf("%v: %s", err, string(out))
+				opErr = fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 			}
 		}
 
@@ -486,5 +558,44 @@ func UpdateImagesMetadata(
 	fmt.Printf(msg.SummaryErrors+"\n", stats.Errors)
 	fmt.Println("========================================")
 
+	if stats.Errors > 0 {
+		logPath := writeErrorLog(displayTarget, stats.ErrorDetails, "")
+		if logPath != "" {
+			fmt.Printf("\n[NOTICE] Encountered %d error(s). Error details saved for lookup in:\n--> %s\n", stats.Errors, logPath)
+		}
+	}
+
 	return stats
+}
+
+func writeErrorLog(targetDir string, errors [][2]string, generalMsg string) string {
+	logFilename := "stocktaggeria_error.log"
+	var logDir string
+	if info, err := os.Stat(targetDir); err == nil && info.IsDir() {
+		logDir = targetDir
+	} else {
+		logDir = "."
+	}
+	logPath := filepath.Join(logDir, logFilename)
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("=== StockTaggerIA Error Log - %s ===\n", time.Now().Format("2006-01-02 15:04:05")))
+	b.WriteString(fmt.Sprintf("OS / Arch   : %s / %s\n", runtime.GOOS, runtime.GOARCH))
+	b.WriteString(fmt.Sprintf("Target      : %s\n", targetDir))
+	if generalMsg != "" {
+		b.WriteString(fmt.Sprintf("General Err : %s\n", generalMsg))
+	}
+	b.WriteString(fmt.Sprintf("Error Count : %d\n", len(errors)))
+	b.WriteString("----------------------------------------------------\n")
+	for i, item := range errors {
+		b.WriteString(fmt.Sprintf("[%d] File : %s\n", i+1, item[0]))
+		b.WriteString(fmt.Sprintf("    Error: %s\n", item[1]))
+	}
+	b.WriteString("====================================================\n\n")
+
+	_ = os.WriteFile(logPath, []byte(b.String()), 0644)
+	if abs, err := filepath.Abs(logPath); err == nil {
+		return abs
+	}
+	return logPath
 }
